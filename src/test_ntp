@@ -1,0 +1,147 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <FirebaseESP32.h>
+#include <time.h>
+
+// ----------------------------------------------------
+// 1. Wi-Fi Credentials - IMPORTANT: USE YOUR HOTSPOT DETAILS HERE
+// ----------------------------------------------------
+#define WIFI_SSID "Vengayam"                  // Your hotspot SSID
+#define WIFI_PASSWORD "1234567890" // Your hotspot password
+
+// ----------------------------------------------------
+// 2. Firebase Credentials
+// ----------------------------------------------------
+#define FIREBASE_API_KEY "AIzaSyCSqfW_z1oXwH2_n3iqgspy34oLgp3P8pI"
+#define FIREBASE_HOST "https://esp-32-setup-default-rtdb.firebaseio.com/"
+
+// Define Firebase Data objects
+FirebaseData firebaseData;
+
+// Define Firebase configuration and authentication objects
+FirebaseConfig firebaseConfig;
+FirebaseAuth firebaseAuth;
+
+// Define a Firebase JSON object for complex data
+FirebaseJson json;
+
+// ----------------------------------------------------
+// 3. Sensor/Data Simulation (for demonstration)
+// ----------------------------------------------------
+int sensorValue = 0; // Simulate a sensor reading
+
+// ----------------------------------------------------
+// 4. Timing for sending data (non-blocking)
+// ----------------------------------------------------
+unsigned long lastSendTime = 0;
+const long sendInterval = 5000; // Send data every 5 seconds (5000 milliseconds)
+
+// --- NTP VARIABLES (USE THE WORKING IP) ---
+const char *ntpServer = "216.239.35.4"; // <--- VERY IMPORTANT: CHECK THIS LINE
+const long gmtOffset_sec = 19800;       // 5.5 hours for Sri Lanka (+5:30)
+const int daylightOffset_sec = 0;
+// --- END OF GLOBAL NTP VARIABLES ---
+
+void setup()
+{
+    Serial.begin(115200);
+    Serial.println("\n--- ESP32 Firebase Data Logger ---");
+
+    // Connect to Wi-Fi
+    Serial.print("Connecting to Wi-Fi: ");
+    Serial.println(WIFI_SSID);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nWi-Fi connected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+
+    // --- Initialize and synchronize time with NTP ---
+    Serial.println("Synchronizing time with NTP server...");
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+    // Wait for time to be set
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo))
+    {
+        Serial.println("Failed to obtain time. Check network/NTP server.");
+    }
+    else
+    {
+        Serial.println("Time synchronized.");
+        // Optional: Print the current time to confirm
+        char timeStr[50];
+        strftime(timeStr, sizeof(timeStr), "%A, %B %d %Y %H:%M:%S", &timeinfo);
+        Serial.print("Current time: ");
+        Serial.println(timeStr);
+    }
+    // --- End of NTP time sync ---
+
+    // --- Firebase Configuration ---
+    firebaseConfig.api_key = FIREBASE_API_KEY;
+    firebaseConfig.database_url = FIREBASE_HOST;
+
+    Serial.print("DEBUG: firebaseConfig.api_key = ");
+    Serial.println(firebaseConfig.api_key.c_str());
+    Serial.print("DEBUG: firebaseConfig.database_url = ");
+    Serial.println(firebaseConfig.database_url.c_str());
+
+    Firebase.begin(&firebaseConfig, &firebaseAuth);
+    Firebase.reconnectWiFi(true);
+
+    Serial.println("Firebase initialized.");
+}
+
+void loop()
+{
+    // --- DEBUGGING: Print real-time connection status ---
+    Serial.print("WiFi Connected: ");
+    Serial.print(WiFi.isConnected() ? "YES" : "NO");
+    Serial.print(", Firebase Ready: ");
+    Serial.println(Firebase.ready() ? "YES" : "NO");
+
+    // If Firebase is NOT ready, try to get more info
+    if (WiFi.isConnected() && !Firebase.ready())
+    {
+        static unsigned long lastErrorPrintTime = 0;
+        if (millis() - lastErrorPrintTime >= 2000)
+        {
+            Serial.print("Firebase is NOT ready. Error: ");
+            Serial.println(firebaseData.errorReason().c_str());
+            lastErrorPrintTime = millis();
+        }
+    }
+
+    // Only send data if connected to WiFi and Firebase
+    if (WiFi.isConnected() && Firebase.ready())
+    {
+        unsigned long currentTime = millis();
+        if (currentTime - lastSendTime >= sendInterval)
+        {
+            lastSendTime = currentTime;
+
+            sensorValue++; // Increment sensor value for demonstration
+
+            json.clear();
+            json.set("value", sensorValue);
+            json.set("uptime_ms", millis());
+            json.set("random_data", random(0, 100));
+
+            if (Firebase.pushJSON(firebaseData, "/readings", json))
+            {
+                Serial.println("OK");
+                Serial.print("Pushed to: ");
+                Serial.println(firebaseData.dataPath().c_str());
+            }
+            else
+            {
+                Serial.print("FAILED, ");
+                Serial.println(firebaseData.errorReason().c_str());
+            }
+        }
+    }
+}
