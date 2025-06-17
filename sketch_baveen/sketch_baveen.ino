@@ -1,7 +1,7 @@
 #define dirPin 2
 #define stepPin 3
 #define limitSwitchPin 5
-
+//This LED lights are indicating the status of the stepper motor
 #define greenLED 6
 #define redLED 7
 #define yellowLED 8
